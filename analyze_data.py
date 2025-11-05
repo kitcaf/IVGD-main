@@ -1,10 +1,12 @@
 import pickle
 import sys
 import numpy as np
+import os
 sys.path.append('data')
 
 # 加载karate数据集作为示例
-with open('data/karate_25c.SG', 'rb') as f:
+currentPath = os.path.dirname(__file__)
+with open(os.path.join(currentPath, 'data', 'karate_25c.SG'), 'rb') as f:
     graph = pickle.load(f)
 
 print('='*70)

@@ -48,9 +48,9 @@ OUTPUT_FILE = os.path.join(SCRIPT_DIR, f'{DATASET_NAME}_25c.SG')   # 输出.SG�
 U2IDX_FILE = os.path.join(DATASET_DIR, 'u2idx.pickle')   # 用户ID映射文件
 IDX2U_FILE = os.path.join(DATASET_DIR, 'idx2u.pickle')   # 索引到用户映射文件
 
-# 概率矩阵参数（与karate数据集保持一致）
-PROB_MIN = 0.0001  # 最小概率值
-PROB_MAX = 0.15    # 最大概率值
+# 概率矩阵参数（基于度中心性）
+PROB_HIGH_DEGREE = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]  # 高度节点的概率选项
+PROB_LOW_DEGREE = [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]   # 低度节点的概率选项
 RANDOM_SEED = 42   # 随机种子，保证可重复性
 
 # 级联处理参数
@@ -74,9 +74,12 @@ print(f"\n配置参数:")
 print(f"  - 数据集名称: {DATASET_NAME}")
 print(f"  - 数据集目录: {DATASET_DIR}")
 print(f"  - 输出文件: {OUTPUT_FILE}")
-print(f"  - 源节点比例: {SOURCE_RATIO * 100}%")
-print(f"  - 基础传播概率: {BASE_PROB}")
+print(f"  - 时间步数: {NUM_TIMESTEPS}")
+print(f"  - 源节点时间比例: 前10%")
+print(f"  - 高度节点概率选项: {PROB_HIGH_DEGREE}")
+print(f"  - 低度节点概率选项: {PROB_LOW_DEGREE}")
 print(f"  - 图类型: {'有向图' if DIRECTED_GRAPH else '无向图'}")
+
 
 
 # ============================================================================
@@ -140,28 +143,33 @@ print(f"  - 非零边数: {adj_sparse.nnz}")
 # ============================================================================
 print("\n[步骤3] 构建传播概率矩阵...")
 
-# 基于度数的概率分配策略
-degree = adj_matrix.sum(axis=1)  # 每个节点的度数
+# 基于度中心性的概率分配策略
+np.random.seed(RANDOM_SEED)
 prob_matrix = np.zeros((n_nodes, n_nodes), dtype=np.float32)
 
-# 根据配置的衰减方式分配概率
+# 计算每个节点的度数
+degree = adj_matrix.sum(axis=1)  # 每个节点的度数
+avg_degree = np.mean(degree)  # 平均度数
+
+print(f"  - 平均度数: {avg_degree:.2f}")
+
+# 为每条边分配概率（基于源节点的度中心性）
 for i in range(n_nodes):
-    if degree[i] > 0:
-        for j in range(n_nodes):
-            if adj_matrix[i, j] == 1:
-                if PROB_DECAY == 'sqrt':
-                    # 概率与度数的平方根成反比
-                    prob_matrix[i, j] = BASE_PROB / np.sqrt(degree[i])
-                elif PROB_DECAY == 'linear':
-                    # 概率与度数成反比
-                    prob_matrix[i, j] = BASE_PROB / degree[i]
-                else:  # 'const'
-                    # 常数概率
-                    prob_matrix[i, j] = BASE_PROB
+    for j in range(n_nodes):
+        if adj_matrix[i, j] == 1:
+            # 根据节点i的度数决定传播概率
+            if degree[i] > avg_degree:
+                # 高度节点：从较高概率范围随机选择
+                p = np.random.choice(PROB_HIGH_DEGREE)
+            else:
+                # 低度节点：从较低概率范围随机选择
+                p = np.random.choice(PROB_LOW_DEGREE)
+            prob_matrix[i, j] = p
 
 prob_sparse = sp.csr_matrix(prob_matrix)
 print(f"  - 传播概率矩阵形状: {prob_sparse.shape}")
 print(f"  - 概率范围: [{prob_matrix[prob_matrix > 0].min():.4f}, {prob_matrix[prob_matrix > 0].max():.4f}]")
+
 
 # ============================================================================
 # 步骤4: 处理级联数据，构建训练样本
@@ -231,96 +239,113 @@ with open(CASCADES_FILE, 'r') as f:
             skipped_cascades += 1
             continue
         
-        # 提取源节点向量 (前SOURCE_RATIO时间内出现的节点)
-        # 计算时间窗口：从最早时间到 (最早时间 + 时间范围 * SOURCE_RATIO)
+        # 归一化时间戳到[0, 1]范围
         min_timestamp = min(timestamplist)
         max_timestamp = max(timestamplist)
         time_range = max_timestamp - min_timestamp
         
         if time_range > 0:
-            # 前5%时间内的节点作为源节点
-            source_time_threshold = min_timestamp + time_range * SOURCE_RATIO
-            source_nodes = [user for user, ts in zip(userlist, timestamplist) 
-                          if ts <= source_time_threshold]
+            # 归一化时间戳
+            normalized_timestamps = [(ts - min_timestamp) / time_range for ts in timestamplist]
         else:
-            # 如果所有节点时间戳相同，取前MIN_SOURCE_NODES个节点
-            source_nodes = userlist[:MIN_SOURCE_NODES]
+            # 如果所有节点时间戳相同，均匀分配
+            normalized_timestamps = [i / len(timestamplist) for i in range(len(timestamplist))]
+        
+        # 构建时间序列影响力矩阵 (N, T)，T=25个时间步
+        influ_mat = np.zeros((n_nodes, NUM_TIMESTEPS), dtype=np.float32)
+        
+        # 确定源节点：前5%时间内出现的节点作为t=0的种子节点
+        source_time_threshold = 0.05  # 5%的时间
+        source_nodes = [user for user, norm_ts in zip(userlist, normalized_timestamps) 
+                       if norm_ts <= source_time_threshold]
         
         # 确保至少有MIN_SOURCE_NODES个源节点
         if len(source_nodes) < MIN_SOURCE_NODES:
             source_nodes = userlist[:MIN_SOURCE_NODES]
         
-        # 扩散结果向量 (所有节点)
-        influence_nodes = userlist
-        
-        # 构建二值向量
-        seed_vector = np.zeros(n_nodes, dtype=np.float32)
-        influence_vector = np.zeros(n_nodes, dtype=np.float32)
-        
+        # 设置t=0时刻的种子节点
         for node in source_nodes:
-            seed_vector[node] = 1.0
+            influ_mat[node, 0] = 1.0
         
-        for node in influence_nodes:
-            influence_vector[node] = 1.0
+        # 将剩余时间（10%-100%）的级联过程分配到24个时间步（t=1到t=24）
+        remaining_nodes = [(user, norm_ts) for user, norm_ts in zip(userlist, normalized_timestamps) 
+                          if norm_ts > source_time_threshold]
         
-        # 检查是否有有效的源节点和扩散节点
-        if seed_vector.sum() > 0 and influence_vector.sum() > seed_vector.sum():
-            all_samples.append((seed_vector, influence_vector))
+        if len(remaining_nodes) > 0:
+            # 将时间范围[0.1, 1.0]映射到时间步[1, 24]
+            for user, norm_ts in remaining_nodes:
+                # 映射到时间步: 0.1 -> 1, 1.0 -> 24
+                time_step = int((norm_ts - source_time_threshold) / (1.0 - source_time_threshold) * 23) + 1
+                time_step = min(time_step, NUM_TIMESTEPS - 1)  # 确保不超过24
+                
+                # 该节点在time_step时刻及之后都被激活
+                influ_mat[user, time_step:] = 1.0
+        else:
+            # 如果没有剩余节点，最后一个时间步与第一个时间步相同
+            influ_mat[:, 1:] = influ_mat[:, 0:1]
+        
+        # 如果某些时间步没有新增节点，用前一个时间步的状态填充
+        for t in range(1, NUM_TIMESTEPS):
+            # 保证单调性：后面的时间步至少包含前面时间步的所有激活节点
+            influ_mat[:, t] = np.maximum(influ_mat[:, t], influ_mat[:, t-1])
+        
+        # 检查是否有有效的级联（源节点数 > 0 且 最终影响节点数 > 源节点数）
+        seed_count = influ_mat[:, 0].sum()
+        final_count = influ_mat[:, -1].sum()
+        
+        if seed_count > 0 and final_count > seed_count:
+            all_samples.append(influ_mat)
             valid_cascades += 1
+            
+            # 限制最大样本数
+            if MAX_SAMPLES is not None and valid_cascades >= MAX_SAMPLES:
+                break
 
-        print(f"  - 总级联数: {line_num}")
-        print(f"  - 有效级联数: {valid_cascades}")
-        print(f"  - 跳过级联数: {skipped_cascades}")
+print(f"  - 总级联数: {line_num}")
+print(f"  - 有效级联数: {valid_cascades}")
+print(f"  - 跳过级联数: {skipped_cascades}")
 
-        if valid_cascades == 0:
-            print("\n错误: 没有有效的级联数据!")
-            exit(1)
+if valid_cascades == 0:
+    print("\n错误: 没有有效的级联数据!")
+    exit(1)
 
 # ============================================================================
-# 步骤5: 构建inverse_pairs张量
+# 步骤5: 构建influ_mat_list张量
 # ============================================================================
 print("\n[步骤5] 构建训练样本张量...")
 
-# 按照原始数据格式构建: [n_batches, batch_size, n_nodes, 2]
-n_samples = len(all_samples)
-n_batches = n_samples  # 每个样本一个batch
+# 将所有样本堆叠成三维数组: [M, N, T]
+# M: 样本数量
+# N: 节点数量
+# T: 时间步数（25）
+influ_mat_list = np.array(all_samples, dtype=np.float32)  # [M, N, T]
 
-# 构建inverse_pairs
-inverse_pairs_list = []
-for i, (seed_vec, influ_vec) in enumerate(all_samples):
-    # 每个样本: [n_nodes, 2]
-    sample = np.stack([seed_vec, influ_vec], axis=1)  # [n_nodes, 2]
-    inverse_pairs_list.append(sample)
+print(f"  - influ_mat_list形状: {influ_mat_list.shape}")
+print(f"  - 样本数 (M): {influ_mat_list.shape[0]}")
+print(f"  - 节点数 (N): {influ_mat_list.shape[1]}")
+print(f"  - 时间步数 (T): {influ_mat_list.shape[2]}")
 
-# 转换为torch张量: [n_samples, n_nodes, 2]
-inverse_pairs = np.array(inverse_pairs_list)  # [n_samples, n_nodes, 2]
+# 验证数据的有效性
+print("\n  样本统计:")
+for i in range(min(3, len(all_samples))):
+    seed_count = int(influ_mat_list[i, :, 0].sum())
+    final_count = int(influ_mat_list[i, :, -1].sum())
+    print(f"    样本 #{i}: 源节点数={seed_count}, 最终影响节点数={final_count}")
 
-# 为了匹配原始格式 [n_batches, batch_size, n_nodes, 2]
-# 我们在第1维添加一个维度
-inverse_pairs = inverse_pairs[:, np.newaxis, :, :]  # [n_samples, 1, n_nodes, 2]
-
-inverse_pairs_tensor = torch.FloatTensor(inverse_pairs)
-
-print(f"  - inverse_pairs形状: {inverse_pairs_tensor.shape}")
-print(f"  - 样本数: {inverse_pairs_tensor.shape[0]}")
-print(f"  - 批次大小: {inverse_pairs_tensor.shape[1]}")
-print(f"  - 节点数: {inverse_pairs_tensor.shape[2]}")
 
 # ============================================================================
 # 步骤6: 保存为.SG文件
 # ============================================================================
 print("\n[步骤6] 保存为.SG文件...")
 
-output_data = {
-    'adj': adj_sparse,
-    'prob': prob_sparse,
-    'inverse_pairs': inverse_pairs_tensor
-}
+# 构建SparseGraph对象
+graph = SparseGraph(adj_sparse, prob_sparse, influ_mat_list)
 
 with open(OUTPUT_FILE, 'wb') as f:
-    pickle.dump(output_data, f)
+    pickle.dump(graph, f)
 
 print(f"  - 数据已保存到: {OUTPUT_FILE}")
+
 
 # ============================================================================
 # 验证数据
@@ -328,19 +353,28 @@ print(f"  - 数据已保存到: {OUTPUT_FILE}")
 print("\n[步骤7] 验证生成的数据...")
 
 with open(OUTPUT_FILE, 'rb') as f:
-    loaded_data = pickle.load(f)
+    loaded_graph = pickle.load(f)
 
-print(f"  - adj形状: {loaded_data['adj'].shape}")
-print(f"  - prob形状: {loaded_data['prob'].shape}")
-print(f"  - inverse_pairs形状: {loaded_data['inverse_pairs'].shape}")
+print(f"  - adj_matrix形状: {loaded_graph.adj_matrix.shape}")
+print(f"  - prob_matrix形状: {loaded_graph.prob_matrix.shape}")
+print(f"  - influ_mat_list形状: {loaded_graph.influ_mat_list.shape}")
 
 # 检查数据样本
-sample_idx = 0
-sample = loaded_data['inverse_pairs'][sample_idx, 0, :, :]
-seed_vec = sample[:, 0]
-influ_vec = sample[:, 1]
-print(f"\n  样本 #{sample_idx}:")
-print(f"    - 源节点数: {int(seed_vec.sum())}")
-print(f"    - 扩散节点数: {int(influ_vec.sum())}")
-print(f"    - 扩散率: {influ_vec.sum() / n_nodes * 100:.2f}%")
+print("\n  前3个样本详情:")
+for sample_idx in range(min(3, loaded_graph.influ_mat_list.shape[0])):
+    influ_mat = loaded_graph.influ_mat_list[sample_idx]  # [N, T]
+    seed_vec = influ_mat[:, 0]
+    influ_vec = influ_mat[:, -1]
+    
+    # 统计中间扩散过程
+    intermediate_counts = [influ_mat[:, t].sum() for t in range(1, NUM_TIMESTEPS-1)]
+    
+    print(f"\n  样本 #{sample_idx}:")
+    print(f"    - 源节点数 (t=0): {int(seed_vec.sum())}")
+    print(f"    - 最终影响节点数 (t=24): {int(influ_vec.sum())}")
+    print(f"    - 扩散率: {influ_vec.sum() / n_nodes * 100:.2f}%")
+    print(f"    - 中间时间步节点数范围: [{int(min(intermediate_counts))}, {int(max(intermediate_counts))}]")
 
+print("\n" + "=" * 70)
+print("数据集构建完成!")
+print("=" * 70)
