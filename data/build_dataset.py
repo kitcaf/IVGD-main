@@ -338,8 +338,12 @@ for i in range(min(3, len(all_samples))):
 # ============================================================================
 print("\n[步骤6] 保存为.SG文件...")
 
-# 构建SparseGraph对象
-graph = SparseGraph(adj_sparse, prob_sparse, influ_mat_list)
+# 构建SparseGraph对象（只传入adj_matrix）
+graph = SparseGraph(adj_sparse)
+
+# 手动设置prob_matrix和influ_mat_list属性
+graph.prob_matrix = prob_sparse
+graph.influ_mat_list = influ_mat_list
 
 with open(OUTPUT_FILE, 'wb') as f:
     pickle.dump(graph, f)
