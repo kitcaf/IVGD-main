@@ -2,10 +2,13 @@
 """
 预训练脚本
 该脚本实现了i-DeepIS模型的预训练过程
+网络中观测到的影响范围（哪些节点被激活）？预测哪些节点是信息扩散的源头（种子节点）
 主要步骤：
 1. 加载数据集并划分训练集/验证集/测试集
 2. 构建i-DeepIS模型（包含MLP和扩散传播模块）
-3. 训练模型并保存最佳模型
+学习节点特征，预测每个节点是种子节点的概率
+
+初步估计
 """
 
 import logging
@@ -29,14 +32,14 @@ me_op = lambda x, y: np.mean(np.abs(x - y))  # 平均绝对误差
 te_op = lambda x, y: np.abs(np.sum(x) - np.sum(y))  # 总体误差
 
 # ==================== 关键参数配置 ====================
-dataset = 'karate'  # 数据集名称: 'karate','dolphins','jazz','netscience','cora_ml', 'power_grid'
+dataset = 'android'  # 数据集名称: 'android, 'karate','dolphins','jazz','netscience','cora_ml', 'power_grid'
 model_name = 'deepis'  # 模型名称: 'deepis'
 
 # 加载数据集
 graph = load_dataset(dataset)
 print(graph)
 
-# 复制影响力矩阵列表
+# 复制影响力矩阵列表 - 快照列表
 influ_mat_list = copy.copy(graph.influ_mat_list)
 num_node = influ_mat_list.shape[1]  # 节点数量
 
@@ -55,7 +58,7 @@ propagate_model = DiffusionPropagate(graph.prob_matrix, niter=2)
 fea_constructor = FeatureCons(model_name, ndim=ndim)
 fea_constructor.prob_matrix = graph.prob_matrix
 
-device = 'cuda'  # 使用GPU
+device = 'cuda:1'  # 使用第二块GPU（GPU 1）
 
 # ==================== 训练参数配置 ====================
 # idx_split_args 需要根据不同数据集调整

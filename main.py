@@ -2,9 +2,12 @@
 主训练脚本
 该脚本实现了IVGD (Inverse Influence Graph Detection) 模型的训练流程
 主要步骤：
-1. 加载预训练的i-DeepIS模型
+1. 加载预训练的i-DeepIS模型（初步估计）
 2. 使用ALM网络对预测结果进行校正
 3. 评估模型在训练集和测试集上的性能
+
+这里主要是训练 ALM 网络，也就是通过约束机制来提高预测准确率
+alm_net: 种子节点数量约束、拉格朗日乘子项（软约束）、二次惩罚项、校正网络约束、标签约束（监督信号）
 """
 
 import logging
@@ -28,7 +31,7 @@ plt.style.use('seaborn')
 import torch.optim as optim
 
 # ==================== 关键参数配置 ====================
-dataset = 'karate'  # 数据集名称: 'karate','dolphins','jazz','netscience','cora_ml', 'power_grid'
+dataset = 'android'  # 数据集名称: 'karate','dolphins','jazz','netscience','cora_ml', 'power_grid'
 model_name = 'deepis'  # 模型名称: 'deepis'
 
 # 加载数据集
@@ -47,7 +50,7 @@ print(graph.influ_mat_list.shape), print(influ_mat_list.shape)
 ndim = 5  # 特征维度
 fea_constructor = FeatureCons(model_name, ndim=ndim)
 fea_constructor.prob_matrix = graph.prob_matrix
-device = 'cuda'  # 使用GPU
+device = 'cuda:1'  # 使用第二块GPU（GPU 1）
 
 # 加载预训练的i-DeepIS模型
 model = torch.load("i-deepis_" + dataset + ".pt")
@@ -114,8 +117,8 @@ train_pr = 0    # 训练集精确率
 test_pr = 0     # 测试集精确率
 train_re = 0    # 训练集召回率
 test_re = 0     # 测试集召回率
-train_fs = 0    # 训练集F1分数
-test_fs = 0     # 测试集F1分数
+train_f1 = 0    # 训练集F1分数
+test_f1 = 0     # 测试集F1分数
 train_auc = 0   # 训练集AUC
 test_auc = 0    # 测试集AUC
 
@@ -149,23 +152,23 @@ for i, influ_mat in enumerate(influ_mat_list):
         train_acc += accuracy_score(seed_vec, seed_correction >= threshold)
         train_pr += precision_score(seed_vec, seed_correction >= threshold, zero_division=1)
         train_re += recall_score(seed_vec, seed_correction >= threshold)
-        train_fs += f1_score(seed_vec, seed_correction >= threshold)
+        train_f1 += f1_score(seed_vec, seed_correction >= threshold)
         train_auc += roc_auc_score(seed_vec, seed_correction)
     else:  # 测试集
         test_acc += accuracy_score(seed_vec, seed_correction >= threshold)
         test_pr += precision_score(seed_vec, seed_correction >= threshold, zero_division=1)
         test_re += recall_score(seed_vec, seed_correction >= threshold)
-        test_fs += f1_score(seed_vec, seed_correction >= threshold)
+        test_f1 += f1_score(seed_vec, seed_correction >= threshold)
         test_auc += roc_auc_score(seed_vec, seed_preds)
 
 # ==================== 输出结果 ====================
 print('training acc:', train_acc / num_training)
 print('training pr:', train_pr / num_training)
 print('training re:', train_re / num_training)
-print('training fs:', train_fs / num_training)
+print('training fs:', train_f1 / num_training)
 print('training auc:', train_auc / num_training)
 print('test acc:', test_acc / (len(influ_mat_list) - num_training))
 print('test pr:', test_pr / (len(influ_mat_list) - num_training))
 print('test re:', test_re / (len(influ_mat_list) - num_training))
-print('test fs:', test_fs / (len(influ_mat_list) - num_training))
+print('test fs:', test_f1 / (len(influ_mat_list) - num_training))
 print('test auc:', test_auc / (len(influ_mat_list) - num_training))
