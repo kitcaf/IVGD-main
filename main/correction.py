@@ -39,5 +39,7 @@ class correction(torch.nn.Module):
         # 残差连接：将原始输入加到输出上
         temp = (temp + x)
         # 将结果裁剪到[0, 1]区间，确保输出是有效的概率值
-        temp = torch.minimum(torch.maximum(torch.zeros(temp.shape), temp), torch.ones(temp.shape))
+        # 使用与temp相同的设备和数据类型
+        temp = torch.minimum(torch.maximum(torch.zeros(temp.shape, device=temp.device, dtype=temp.dtype), temp), 
+                            torch.ones(temp.shape, device=temp.device, dtype=temp.dtype))
         return temp
