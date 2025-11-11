@@ -56,7 +56,7 @@ fea_constructor.prob_matrix = graph.prob_matrix
 device = 'cuda:1'  # 使用第二块GPU（GPU 1）
 
 # 加载预训练的i-DeepIS模型
-model = torch.load("i-deepis_" + dataset + ".pt")
+model = torch.load("i-deepis_" + dataset + ".pt", weights_only=False)
 
 # 获取第一个样本的预测结果（用于测试）
 influ_pred = get_predictions_new_seeds(model, fea_constructor, graph.influ_mat_list[0, :, 0], 
