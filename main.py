@@ -27,7 +27,10 @@ logging.basicConfig(
     format='%(asctime)s:%(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     level=logging.INFO)
-plt.style.use('seaborn')
+try:
+    plt.style.use('seaborn-v0_8')
+except OSError:
+    pass
 import torch.optim as optim
 
 # ==================== 关键参数配置 ====================
