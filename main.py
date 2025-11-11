@@ -57,6 +57,7 @@ device = 'cuda:1'  # 使用第二块GPU（GPU 1）
 
 # 加载预训练的i-DeepIS模型
 model = torch.load("i-deepis_" + dataset + ".pt", weights_only=False)
+model = model.to(device)  # 将模型移到GPU
 
 # 获取第一个样本的预测结果（用于测试）
 influ_pred = get_predictions_new_seeds(model, fea_constructor, graph.influ_mat_list[0, :, 0], 
@@ -71,16 +72,17 @@ lamda = 0      # 拉格朗日乘子初始值
 threshold = 0.5  # 二分类阈值
 
 # 初始化拉格朗日乘子
-nu = torch.zeros(size=(graph.influ_mat_list.shape[1], 1))
+nu = torch.zeros(size=(graph.influ_mat_list.shape[1], 1)).to(device)
 
 # 创建ALM网络
 net = alm_net(alpha=alpha, tau=tau, rho=rho)
+net = net.to(device)  # 将ALM网络移到GPU
 optimizer = optim.SGD(net.parameters(), lr=1e-2)
 
 # ==================== 训练阶段 ====================
 net.train()
 for i, influ_mat in enumerate(graph.influ_mat_list):
-    print("i={:d}".format(i))
+    print("shampe: i={:d}\n".format(i))
     # 提取种子节点向量和影响力向量
     seed_vec = influ_mat[:, 0]  # 第0列是种子节点标记
     seed_idx = np.argwhere(seed_vec == 1)  # 找到种子节点索引
@@ -91,13 +93,13 @@ for i, influ_mat in enumerate(graph.influ_mat_list):
     
     # 根据影响力向量反推种子节点
     seed_preds = get_idx_new_seeds(model, influ_vec)
-    seed_preds = torch.tensor(seed_preds).unsqueeze(-1).float()
-    influ_vec = torch.tensor(influ_vec).unsqueeze(-1).float()
-    seed_vec = torch.tensor(seed_vec).unsqueeze(-1).float()
+    seed_preds = torch.tensor(seed_preds).unsqueeze(-1).float().to(device)
+    influ_vec = torch.tensor(influ_vec).unsqueeze(-1).float().to(device)
+    seed_vec = torch.tensor(seed_vec).unsqueeze(-1).float().to(device)
     
     # 训练ALM网络（每个样本训练10个epoch）
     for epoch in range(10):
-        print("epoch:" + str(epoch))
+        print("epoch:" + str(epoch) + "\n")
         optimizer.zero_grad()
         # 使用ALM网络校正预测结果
         seed_correction = net(seed_preds, seed_vec, lamda)
@@ -137,9 +139,9 @@ for i, influ_mat in enumerate(influ_mat_list):
     
     # 获取预测结果
     seed_preds = get_idx_new_seeds(model, influ_vec)
-    seed_preds = torch.tensor(seed_preds).unsqueeze(-1).float()
-    influ_vec = torch.tensor(influ_vec).unsqueeze(-1).float()
-    seed_vec = torch.tensor(seed_vec).unsqueeze(-1).float()
+    seed_preds = torch.tensor(seed_preds).unsqueeze(-1).float().to(device)
+    influ_vec = torch.tensor(influ_vec).unsqueeze(-1).float().to(device)
+    seed_vec = torch.tensor(seed_vec).unsqueeze(-1).float().to(device)
     
     # 使用ALM网络校正预测
     seed_correction = net(seed_preds, seed_preds, lamda)
