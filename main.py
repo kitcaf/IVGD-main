@@ -147,10 +147,10 @@ for i, influ_mat in enumerate(influ_mat_list):
     seed_correction = net(seed_preds, seed_preds, lamda)
     seed_correction = torch.softmax(seed_correction, dim=1)
     
-    # 转换为numpy数组
-    seed_preds = seed_preds.squeeze(-1).detach().numpy()
-    seed_correction = seed_correction[:, 1].squeeze(-1).detach().numpy()
-    seed_vec = seed_vec.squeeze(-1).detach().numpy()
+    # 转换为numpy数组（先拷贝到CPU）
+    seed_preds = seed_preds.squeeze(-1).detach().cpu().numpy()
+    seed_correction = seed_correction[:, 1].squeeze(-1).detach().cpu().numpy()
+    seed_vec = seed_vec.squeeze(-1).detach().cpu().numpy()
     
     # 计算各项指标
     if i < num_training:  # 训练集
