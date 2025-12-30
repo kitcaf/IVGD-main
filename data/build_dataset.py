@@ -139,37 +139,56 @@ print(f"  - 邻接矩阵形状: {adj_sparse.shape}")
 print(f"  - 非零边数: {adj_sparse.nnz}")
 
 # ============================================================================
-# 步骤3: 构建传播概率矩阵
+# [优化版] 步骤3: 构建传播概率矩阵
 # ============================================================================
-print("\n[步骤3] 构建传播概率矩阵...")
+print("\n[步骤3] 构建传播概率矩阵 (向量化优化版)...")
 
-# 基于度中心性的概率分配策略
+# 确保随机性可复现
 np.random.seed(RANDOM_SEED)
-prob_matrix = np.zeros((n_nodes, n_nodes), dtype=np.float32)
 
-# 计算每个节点的度数
-degree = adj_matrix.sum(axis=1)  # 每个节点的度数
-avg_degree = np.mean(degree)  # 平均度数
+# 1. 计算度数信息
+# 注意：adj_sparse 是 CSR 格式，sum(axis=1) 返回的是矩阵 (N, 1)
+degrees = np.array(adj_sparse.sum(axis=1)).flatten()
+avg_degree = np.mean(degrees)
 
 print(f"  - 平均度数: {avg_degree:.2f}")
 
-# 为每条边分配概率（基于源节点的度中心性）
-for i in range(n_nodes):
-    for j in range(n_nodes):
-        if adj_matrix[i, j] == 1:
-            # 根据节点i的度数决定传播概率
-            if degree[i] > avg_degree:
-                # 高度节点：从较高概率范围随机选择
-                p = np.random.choice(PROB_HIGH_DEGREE)
-            else:
-                # 低度节点：从较低概率范围随机选择
-                p = np.random.choice(PROB_LOW_DEGREE)
-            prob_matrix[i, j] = p
+# 2. 获取所有存在的边 (源节点索引, 目标节点索引)
+# 使用 nonzero() 直接获取稀疏矩阵中非零元素的坐标，避免遍历 N*N
+rows, cols = adj_sparse.nonzero()
+num_edges = len(rows)
 
-prob_sparse = sp.csr_matrix(prob_matrix)
+print(f"  - 处理边数: {num_edges}")
+
+# 3. 向量化分配概率
+# 创建一个与边数等长的数组来存储概率
+edge_probs = np.zeros(num_edges, dtype=np.float32)
+
+# 获取所有边的源节点度数
+source_degrees = degrees[rows]
+
+# 创建掩码：哪些边的源节点是高度节点
+high_degree_mask = source_degrees > avg_degree
+low_degree_mask = ~high_degree_mask
+
+# 计算高度和低度边的数量
+num_high = np.sum(high_degree_mask)
+num_low = np.sum(low_degree_mask)
+
+# 批量生成概率 (比逐个 random.choice 快得多)
+# 从 PROB_HIGH_DEGREE 中随机采样
+edge_probs[high_degree_mask] = np.random.choice(PROB_HIGH_DEGREE, size=num_high)
+# 从 PROB_LOW_DEGREE 中随机采样
+edge_probs[low_degree_mask] = np.random.choice(PROB_LOW_DEGREE, size=num_low)
+
+# 4. 直接构建稀疏概率矩阵
+# 使用 (data, (row, col)) 格式直接创建 CSR 矩阵
+prob_sparse = sp.csr_matrix((edge_probs, (rows, cols)), shape=adj_sparse.shape, dtype=np.float32)
+
 print(f"  - 传播概率矩阵形状: {prob_sparse.shape}")
-print(f"  - 概率范围: [{prob_matrix[prob_matrix > 0].min():.4f}, {prob_matrix[prob_matrix > 0].max():.4f}]")
-
+print(f"  - 概率范围: [{edge_probs.min():.4f}, {edge_probs.max():.4f}]")
+print(f"  - 高度节点边数: {num_high}")
+print(f"  - 低度节点边数: {num_low}")
 
 # ============================================================================
 # 步骤4: 处理级联数据，构建训练样本

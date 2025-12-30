@@ -58,7 +58,7 @@ propagate_model = DiffusionPropagate(graph.prob_matrix, niter=2)
 fea_constructor = FeatureCons(model_name, ndim=ndim)
 fea_constructor.prob_matrix = graph.prob_matrix
 
-device = 'cuda:1'  # 使用第二块GPU（GPU 1）
+device = 'cuda:0'  # 使用第二块GPU（GPU 1）
 
 # ==================== 训练参数配置 ====================
 # idx_split_args 需要根据不同数据集调整

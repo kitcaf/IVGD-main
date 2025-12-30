@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from main.training import FeatureCons, get_idx_new_seeds, get_predictions_new_seeds
 from main.utils import load_dataset
 from main.alm_net import alm_net
+from main.metrics_utils import compute_all_metrics, precompute_shortest_paths
 import torch
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, roc_auc_score, mean_squared_error
 
@@ -53,7 +54,7 @@ print(graph.influ_mat_list.shape), print(influ_mat_list.shape)
 ndim = 5  # 特征维度
 fea_constructor = FeatureCons(model_name, ndim=ndim)
 fea_constructor.prob_matrix = graph.prob_matrix
-device = 'cuda:1'  # 使用第二块GPU（GPU 1）
+device = 'cuda:0'  # 使用第二块GPU（GPU 1）
 
 # 加载预训练的i-DeepIS模型
 model = torch.load("i-deepis_" + dataset + ".pt", weights_only=False)
@@ -115,6 +116,11 @@ graph = load_dataset(dataset)
 influ_mat_list = copy.copy(graph.influ_mat_list)
 print(graph)
 
+# 预计算最短路径矩阵（用于AED指标计算）
+print("预计算最短路径矩阵...")
+dist_matrix = precompute_shortest_paths(graph.adj_matrix)
+print("✓ 最短路径矩阵计算完成")
+
 # 初始化评估指标
 train_acc = 0   # 训练集准确率
 test_acc = 0    # 测试集准确率
@@ -126,6 +132,14 @@ train_f1 = 0    # 训练集F1分数
 test_f1 = 0     # 测试集F1分数
 train_auc = 0   # 训练集AUC
 test_auc = 0    # 测试集AUC
+
+# 初始化概率序列指标
+train_map = 0   # 训练集MAP
+test_map = 0    # 测试集MAP
+train_p_at_k = 0  # 训练集P@K_true
+test_p_at_k = 0   # 测试集P@K_true
+train_aed = 0   # 训练集AED
+test_aed = 0    # 测试集AED
 
 # 遍历所有样本进行评估
 for i, influ_mat in enumerate(influ_mat_list):
@@ -151,6 +165,11 @@ for i, influ_mat in enumerate(influ_mat_list):
     seed_preds = seed_preds.squeeze(-1).detach().cpu().numpy()
     seed_correction = seed_correction[:, 1].squeeze(-1).detach().cpu().numpy()
     seed_vec = seed_vec.squeeze(-1).detach().cpu().numpy()
+    influ_vec_np = influ_vec.detach().cpu().numpy()
+    
+    # 计算感染节点数和源点数
+    num_infected = int(np.sum(influ_vec_np))
+    num_sources = int(np.sum(seed_vec))
     
     # 计算各项指标
     if i < num_training:  # 训练集
@@ -159,21 +178,72 @@ for i, influ_mat in enumerate(influ_mat_list):
         train_re += recall_score(seed_vec, seed_correction >= threshold)
         train_f1 += f1_score(seed_vec, seed_correction >= threshold)
         train_auc += roc_auc_score(seed_vec, seed_correction)
+        
+        # 计算概率序列指标
+        metrics = compute_all_metrics(
+            y_true_prob=seed_correction,
+            y_true_binary=seed_vec,
+            map_top_k=num_infected,  # 感染节点数
+            pk_top_k=num_sources,    # 真实源点数
+            aed_top_k=num_sources,   # 真实源点数
+            dist_matrix=dist_matrix,
+            adj_matrix=None
+        )
+        train_map += metrics['MAP']
+        train_p_at_k += metrics['P@K']
+        train_aed += metrics['AED']
     else:  # 测试集
         test_acc += accuracy_score(seed_vec, seed_correction >= threshold)
         test_pr += precision_score(seed_vec, seed_correction >= threshold, zero_division=1)
         test_re += recall_score(seed_vec, seed_correction >= threshold)
         test_f1 += f1_score(seed_vec, seed_correction >= threshold)
         test_auc += roc_auc_score(seed_vec, seed_preds)
+        
+        # 计算概率序列指标
+        metrics = compute_all_metrics(
+            y_true_prob=seed_correction,
+            y_true_binary=seed_vec,
+            map_top_k=num_infected,  # 感染节点数
+            pk_top_k=num_sources,    # 真实源点数
+            aed_top_k=num_sources,   # 真实源点数
+            dist_matrix=dist_matrix,
+            adj_matrix=None
+        )
+        test_map += metrics['MAP']
+        test_p_at_k += metrics['P@K']
+        test_aed += metrics['AED']
 
 # ==================== 输出结果 ====================
-print('training acc:', train_acc / num_training)
-print('training pr:', train_pr / num_training)
-print('training re:', train_re / num_training)
-print('training fs:', train_f1 / num_training)
-print('training auc:', train_auc / num_training)
-print('test acc:', test_acc / (len(influ_mat_list) - num_training))
-print('test pr:', test_pr / (len(influ_mat_list) - num_training))
-print('test re:', test_re / (len(influ_mat_list) - num_training))
-print('test fs:', test_f1 / (len(influ_mat_list) - num_training))
-print('test auc:', test_auc / (len(influ_mat_list) - num_training))
+num_test = len(influ_mat_list) - num_training
+
+print('\n' + '=' * 80)
+print('评估结果统计')
+print('=' * 80)
+
+print('\n【训练集指标】')
+print(f'  Accuracy:  {train_acc / num_training:.6f}')
+print(f'  Precision: {train_pr / num_training:.6f}')
+print(f'  Recall:    {train_re / num_training:.6f}')
+print(f'  F1-Score:  {train_f1 / num_training:.6f}')
+print(f'  AUC:       {train_auc / num_training:.6f}')
+print(f'  MAP:       {train_map / num_training:.6f}')
+print(f'  P@K_true:  {train_p_at_k / num_training:.6f}')
+print(f'  AED:       {train_aed / num_training:.6f}')
+
+print('\n【测试集指标】')
+print(f'  Accuracy:  {test_acc / num_test:.6f}')
+print(f'  Precision: {test_pr / num_test:.6f}')
+print(f'  Recall:    {test_re / num_test:.6f}')
+print(f'  F1-Score:  {test_f1 / num_test:.6f}')
+print(f'  AUC:       {test_auc / num_test:.6f}')
+print(f'  MAP:       {test_map / num_test:.6f}')
+print(f'  P@K_true:  {test_p_at_k / num_test:.6f}')
+print(f'  AED:       {test_aed / num_test:.6f}')
+
+print('\n' + '=' * 80)
+print('指标说明：')
+print('  - Accuracy/Precision/Recall/F1-Score/AUC: 二分类评估指标')
+print('  - MAP (Mean Average Precision): K值为感染区域节点数')
+print('  - P@K_true (Precision@K_true): K值为真实源点数')
+print('  - AED (Average Euclidean Distance): 基于真实源点数计算拓扑容错性')
+print('=' * 80)
