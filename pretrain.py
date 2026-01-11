@@ -16,6 +16,7 @@ import numpy as np
 from pathlib import Path
 import copy
 import torch
+import os
 from main.i_deepis import i_DeepIS, DiffusionPropagate
 from main.models.MLP import MLPTransform
 from main.training import train_model, FeatureCons, get_predictions_new_seeds
@@ -31,8 +32,9 @@ logging.basicConfig(
 me_op = lambda x, y: np.mean(np.abs(x - y))  # 平均绝对误差
 te_op = lambda x, y: np.abs(np.sum(x) - np.sum(y))  # 总体误差
 
-# ==================== 关键参数配置 ====================
-dataset = 'android'  # 数据集名称: 'android, 'karate','dolphins','jazz','netscience','cora_ml', 'power_grid'
+# ==================== 从环境变量加载配置 ====================
+dataset = os.environ.get('IVGD_DATASET', 'android')  # 默认 'android'
+device = os.environ.get('IVGD_DEVICE', 'cuda:0')   # 默认 'cuda:0'
 model_name = 'deepis'  # 模型名称: 'deepis'
 
 # 加载数据集
@@ -58,7 +60,7 @@ propagate_model = DiffusionPropagate(graph.prob_matrix, niter=2)
 fea_constructor = FeatureCons(model_name, ndim=ndim)
 fea_constructor.prob_matrix = graph.prob_matrix
 
-device = 'cuda:0'  # 使用第二块GPU（GPU 1）
+# device = 'cuda:0'  # 使用第二块GPU（GPU 1） # 从环境变量接管
 
 # ==================== 训练参数配置 ====================
 # idx_split_args 需要根据不同数据集调整
