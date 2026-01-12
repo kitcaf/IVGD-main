@@ -136,8 +136,8 @@ class MLPTransform(nn.Module):
         
         weight = module.weight.clone()
         # 初始化左右奇异向量
-        u = torch.rand(weight.shape[0], device=self.device)
-        v = torch.rand(weight.shape[0], device=self.device)
+        u = torch.rand(weight.shape[0], device=weight.device)
+        v = torch.rand(weight.shape[1], device=weight.device)
         
         with torch.no_grad():
             # 幂迭代方法：迭代计算最大奇异值对应的左右奇异向量

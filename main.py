@@ -20,7 +20,7 @@ import os
 from main.training import FeatureCons, get_idx_new_seeds, get_predictions_new_seeds
 from main.utils import load_dataset
 from main.alm_net import alm_net
-from main.metrics_utils import compute_all_metrics, precompute_shortest_paths
+from metrics_utils import compute_all_metrics, precompute_shortest_paths
 import torch
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, roc_auc_score, mean_squared_error
 
@@ -154,9 +154,12 @@ for i in range(num_training, num_training + num_validation):
     # 转换为numpy数组
     seed_correction = seed_correction[:, 1].squeeze(-1).detach().cpu().numpy()
     seed_vec = seed_vec.squeeze(-1).detach().cpu().numpy()
+    influ_vec_np = influ_vec
     
-    val_predictions.append(seed_correction)
-    val_labels.append(seed_vec)
+    # 只收集感染区域内的节点（真实源点一定在感染区内）
+    infected_mask = influ_vec_np == 1
+    val_predictions.append(seed_correction[infected_mask])
+    val_labels.append(seed_vec[infected_mask])
 
 # 合并验证集数据
 val_predictions = np.concatenate(val_predictions, axis=0)
@@ -229,11 +232,22 @@ for i, influ_mat in enumerate(influ_mat_list):
     
     # 计算各项指标
     if i < num_training:  # 训练集
-        train_acc += accuracy_score(seed_vec, seed_pred_binary)
-        train_pr += precision_score(seed_vec, seed_pred_binary, zero_division=1)
-        train_re += recall_score(seed_vec, seed_pred_binary, zero_division=0)
-        train_f1 += f1_score(seed_vec, seed_pred_binary, zero_division=0)
-        train_auc += roc_auc_score(seed_vec, seed_correction, zero_division=0)
+        # 只在感染区域内计算所有二分类指标（真实源点一定在感染区内）
+        infected_mask = influ_vec_np.flatten() == 1
+        seed_vec_infected = seed_vec[infected_mask]
+        seed_correction_infected = seed_correction[infected_mask]
+        seed_pred_binary_infected = seed_correction_infected >= best_threshold
+        
+        train_acc += accuracy_score(seed_vec_infected, seed_pred_binary_infected)
+        train_pr += precision_score(seed_vec_infected, seed_pred_binary_infected, zero_division=1)
+        train_re += recall_score(seed_vec_infected, seed_pred_binary_infected, zero_division=0)
+        train_f1 += f1_score(seed_vec_infected, seed_pred_binary_infected, zero_division=0)
+        # AUC计算：需要检查是否同时有正负样本
+        if seed_vec_infected.sum() > 0 and seed_vec_infected.sum() < len(seed_vec_infected):
+            try:
+                train_auc += roc_auc_score(seed_vec_infected, seed_correction_infected)
+            except ValueError:
+                pass
         
         # 计算概率序列指标
         metrics = compute_all_metrics(
@@ -250,11 +264,22 @@ for i, influ_mat in enumerate(influ_mat_list):
         train_aed += metrics['AED']
         
     elif i < num_training + num_validation:  # 验证集
-        val_acc += accuracy_score(seed_vec, seed_pred_binary)
-        val_pr += precision_score(seed_vec, seed_pred_binary, zero_division=1)
-        val_re += recall_score(seed_vec, seed_pred_binary, zero_division=0)
-        val_f1 += f1_score(seed_vec, seed_pred_binary, zero_division=0)
-        val_auc += roc_auc_score(seed_vec, seed_correction, zero_division=0)
+        # 只在感染区域内计算所有二分类指标（真实源点一定在感染区内）
+        infected_mask = influ_vec_np.flatten() == 1
+        seed_vec_infected = seed_vec[infected_mask]
+        seed_correction_infected = seed_correction[infected_mask]
+        seed_pred_binary_infected = seed_correction_infected >= best_threshold
+        
+        val_acc += accuracy_score(seed_vec_infected, seed_pred_binary_infected)
+        val_pr += precision_score(seed_vec_infected, seed_pred_binary_infected, zero_division=1)
+        val_re += recall_score(seed_vec_infected, seed_pred_binary_infected, zero_division=0)
+        val_f1 += f1_score(seed_vec_infected, seed_pred_binary_infected, zero_division=0)
+        # AUC计算：需要检查是否同时有正负样本
+        if seed_vec_infected.sum() > 0 and seed_vec_infected.sum() < len(seed_vec_infected):
+            try:
+                val_auc += roc_auc_score(seed_vec_infected, seed_correction_infected)
+            except ValueError:
+                pass
         
         # 计算概率序列指标
         metrics = compute_all_metrics(
@@ -271,11 +296,22 @@ for i, influ_mat in enumerate(influ_mat_list):
         val_aed += metrics['AED']
         
     else:  # 测试集
-        test_acc += accuracy_score(seed_vec, seed_pred_binary)
-        test_pr += precision_score(seed_vec, seed_pred_binary, zero_division=1)
-        test_re += recall_score(seed_vec, seed_pred_binary, zero_division=0)
-        test_f1 += f1_score(seed_vec, seed_pred_binary, zero_division=0)
-        test_auc += roc_auc_score(seed_vec, seed_correction, zero_division=0)
+        # 只在感染区域内计算所有二分类指标（真实源点一定在感染区内）
+        infected_mask = influ_vec_np.flatten() == 1
+        seed_vec_infected = seed_vec[infected_mask]
+        seed_correction_infected = seed_correction[infected_mask]
+        seed_pred_binary_infected = seed_correction_infected >= best_threshold
+        
+        test_acc += accuracy_score(seed_vec_infected, seed_pred_binary_infected)
+        test_pr += precision_score(seed_vec_infected, seed_pred_binary_infected, zero_division=1)
+        test_re += recall_score(seed_vec_infected, seed_pred_binary_infected, zero_division=0)
+        test_f1 += f1_score(seed_vec_infected, seed_pred_binary_infected, zero_division=0)
+        # AUC计算：需要检查是否同时有正负样本
+        if seed_vec_infected.sum() > 0 and seed_vec_infected.sum() < len(seed_vec_infected):
+            try:
+                test_auc += roc_auc_score(seed_vec_infected, seed_correction_infected)
+            except ValueError:
+                pass
         
         # 计算概率序列指标
         metrics = compute_all_metrics(
@@ -334,7 +370,9 @@ print(f'  AED:       {test_aed / num_test_final:.6f}')
 
 print('\n' + '=' * 80)
 print('指标说明：')
-print('  - Accuracy/Precision/Recall/F1-Score/AUC: 二分类评估指标')
+print('  - 所有指标均在感染区域内计算（非感染节点不参与评估）')
+print('  - Accuracy/Precision/Recall/F1-Score: 二分类评估指标（基于阈值）')
+print('  - AUC: 排序能力指标（不依赖阈值）')
 print('  - 二值化时使用动态阈值: {:.4f}'.format(best_threshold))
 print('  - MAP (Mean Average Precision): K值为感染区域节点数')
 print('  - P@K_true (Precision@K_true): K值为真实源点数')

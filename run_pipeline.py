@@ -11,7 +11,7 @@ from pathlib import Path
 
 # ==================== 集中配置 ====================
 # 在这里修改要运行的数据集和使用的GPU设备
-DATASET = 'android'  # 可选: 'karate', 'dolphins', 'jazz', 'netscience', 'cora_ml', 'power_grid'
+DATASET = 'christianity'  # 可选: 'karate', 'dolphins', 'jazz', 'netscience', 'cora_ml', 'power_grid'
 DEVICE = 'cuda:0'    # 例如: 'cuda:0', 'cuda:1', 'cpu'
 # =================================================
 
@@ -22,6 +22,13 @@ def run_pretrain():
     print("=" * 80)
     
     script_path = Path(__file__).parent / "pretrain.py"
+    
+    # Check if model already exists
+    model_path = Path(__file__).parent / f"i-deepis_{DATASET}.pt"
+    if model_path.exists():
+        print(f"\n✓ 检测到已有预训练模型: {model_path.name}")
+        print("✓ 跳过预训练步骤...")
+        return True
     
     # 为子进程设置环境变量
     env = os.environ.copy()
